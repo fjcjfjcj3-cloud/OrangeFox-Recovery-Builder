@@ -125,9 +125,11 @@ jobs:
             "$DEVICE_PATH"
 
           echo "===== DEVICE TREE ====="
+
           ls -la "$DEVICE_PATH"
 
           echo "===== DEVICE TREE COMMIT ====="
+
           git -C "$DEVICE_PATH" rev-parse HEAD
 
       - name: Fix X6886 Device Tree
@@ -145,34 +147,55 @@ jobs:
             exit 1
           fi
 
+          if [ ! -f "$VENDORSETUP_FILE" ]; then
+            echo "ERROR: vendorsetup.sh not found"
+            exit 1
+          fi
+
           echo "===== AndroidProducts.mk BEFORE ====="
+
           cat "$PRODUCT_FILE"
 
-          echo "===== Fixing old product name ====="
+          echo "===== vendorsetup.sh BEFORE ====="
+
+          cat "$VENDORSETUP_FILE"
+
+          echo "===== FIXING PRODUCT NAMES ====="
 
           sed -i \
             's/ofox_X6886-bp2a-eng/ofox_X6886-eng/g' \
             "$PRODUCT_FILE"
 
-          echo "===== Creating vendorsetup.sh ====="
+          sed -i \
+            's/ofox_X6886-bp2a-userdebug/ofox_X6886-userdebug/g' \
+            "$PRODUCT_FILE"
 
-          if [ ! -f "$VENDORSETUP_FILE" ]; then
-            printf '%s\n' '#!/bin/bash' > "$VENDORSETUP_FILE"
-          fi
+          echo "===== REMOVING OBSOLETE add_lunch_combo ====="
 
-          chmod 644 "$VENDORSETUP_FILE"
+          sed -i \
+            '/^[[:space:]]*add_lunch_combo[[:space:]]/d' \
+            "$VENDORSETUP_FILE"
 
           echo "===== AndroidProducts.mk AFTER ====="
+
           cat "$PRODUCT_FILE"
 
-          echo "===== vendorsetup.sh ====="
+          echo "===== vendorsetup.sh AFTER ====="
+
           cat "$VENDORSETUP_FILE"
 
-          echo "===== Checking lunch target ====="
+          echo "===== CHECKING PRODUCT ====="
 
           grep -q "ofox_X6886-eng" "$PRODUCT_FILE"
 
-          echo "X6886 lunch target OK"
+          echo "===== CHECKING vendorsetup.sh ====="
+
+          if grep -q "add_lunch_combo" "$VENDORSETUP_FILE"; then
+            echo "ERROR: add_lunch_combo still exists"
+            exit 1
+          fi
+
+          echo "X6886 device tree fix completed successfully"
 
       - name: Build OrangeFox
         shell: bash
@@ -191,7 +214,7 @@ jobs:
 
           lunch "ofox_${DEVICE_NAME}-eng"
 
-          echo "===== Build target ====="
+          echo "===== Build vendor_boot ====="
 
           mka vendorbootimage -j2
 
@@ -210,9 +233,9 @@ jobs:
 
           if [ -z "$IMG" ]; then
             echo "ERROR: OrangeFox image was not found"
-            echo "Searching all output directories..."
 
-            find "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH/out" \
+            find \
+              "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH/out" \
               -type f \
               \( -name "*.img" -o -name "vendor_boot*" \) \
               | head -100
@@ -221,12 +244,12 @@ jobs:
           fi
 
           echo "===== ORANGEFOX IMAGE FOUND ====="
+
           echo "$IMG"
 
           cp "$IMG" "$OUT/vendor_boot.img"
 
           echo "FILE_PATH=$OUT" >> "$GITHUB_ENV"
-          echo "RECOVERY_TYPE=vendor_boot" >> "$GITHUB_ENV"
           echo "CHECK_IMG_IS_OK=true" >> "$GITHUB_ENV"
 
       - name: Include Recovery Installer
