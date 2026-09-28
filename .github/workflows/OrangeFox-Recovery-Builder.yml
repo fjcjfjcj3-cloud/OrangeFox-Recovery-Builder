@@ -1,20 +1,20 @@
-name: OrangeFox - Build
+name: OrangeFox - Build X6886
 
 on:
   workflow_dispatch:
     inputs:
       MANIFEST_BRANCH:
-        description: "OrangeFox Branch"
+        description: "OrangeFox branch"
         required: true
         default: "12.1"
 
       DEVICE_TREE:
-        description: "Custom Recovery Tree"
+        description: "X6886 device tree"
         required: true
         default: "https://github.com/BeruCrypt02/twrp_device_infinix_X6886-a16"
 
       DEVICE_TREE_BRANCH:
-        description: "Custom Recovery Tree Branch"
+        description: "Device tree branch"
         required: true
         default: "android-12.1"
 
@@ -29,31 +29,17 @@ on:
         default: "X6886"
 
       BUILD_TARGET:
-        description: "Build Target"
+        description: "Build target"
         required: true
         default: "vendorboot"
 
-      LDCHECK:
-        description: "Blob path"
-        required: true
-        default: "vendor/bin/tee"
-
-      RECOVERY_INSTALLER:
-        description: "Include recovery installer"
-        required: true
-        type: boolean
-        default: true
-
 jobs:
   build:
-    name: Build OrangeFox for X6886
-
-    runs-on: ubuntu-latest
-
-    if: github.event.repository.owner.id == github.event.sender.id
+    name: Build OrangeFox X6886
+    runs-on: ubuntu-22.04
 
     permissions:
-      contents: write
+      contents: read
 
     env:
       MANIFEST_BRANCH: ${{ inputs.MANIFEST_BRANCH }}
@@ -62,70 +48,68 @@ jobs:
       DEVICE_PATH: ${{ inputs.DEVICE_PATH }}
       DEVICE_NAME: ${{ inputs.DEVICE_NAME }}
       BUILD_TARGET: ${{ inputs.BUILD_TARGET }}
-      LDCHECK: ${{ inputs.LDCHECK }}
 
     steps:
 
-      # --------------------------------------------------
+      # ==========================================
       # CHECKOUT
-      # --------------------------------------------------
+      # ==========================================
 
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
 
-      # --------------------------------------------------
-      # CLEAN RUNNER
-      # --------------------------------------------------
-
-      - name: Clean-up
-        uses: rokibhasansagar/slimhub_actions@main
-
-
-      # --------------------------------------------------
+      # ==========================================
       # SWAP
-      # --------------------------------------------------
+      # ==========================================
 
-      - name: Swap Space
+      - name: Configure swap
         uses: pierotofy/set-swap-space@master
         with:
           swap-size-gb: 24
 
 
-      # --------------------------------------------------
+      # ==========================================
       # BUILD ENVIRONMENT
-      # --------------------------------------------------
+      # ==========================================
 
-      - name: Build Environment
+      - name: Install build environment
         shell: bash
         run: |
           set -e
 
-          echo "===== Updating Ubuntu ====="
+          sudo apt-get update
 
-          sudo apt update
+          sudo apt-get install -y \
+            git \
+            curl \
+            wget \
+            unzip \
+            zip \
+            python3 \
+            python3-pip \
+            bc \
+            bison \
+            flex \
+            build-essential
 
-          sudo apt -y upgrade
+          git clone \
+            https://gitlab.com/OrangeFox/misc/scripts \
+            "$GITHUB_WORKSPACE/orangefox-scripts"
 
-          echo "===== Installing OrangeFox build environment ====="
-
-          git clone https://gitlab.com/OrangeFox/misc/scripts
-
-          cd scripts
+          cd "$GITHUB_WORKSPACE/orangefox-scripts"
 
           sudo bash setup/android_build_env.sh
 
 
-      # --------------------------------------------------
-      # ORANGEFOX MANIFEST
-      # --------------------------------------------------
+      # ==========================================
+      # ORANGEFOX SOURCE
+      # ==========================================
 
-      - name: Set-up OrangeFox Manifest
+      - name: Sync OrangeFox source
         shell: bash
         run: |
           set -e
-
-          echo "===== Creating OrangeFox directory ====="
 
           mkdir -p "$GITHUB_WORKSPACE/OrangeFox"
 
@@ -133,37 +117,31 @@ jobs:
 
           git config --global user.name "OrangeFox Builder"
 
-          git config --global user.email "builder@localhost"
+          git config --global user.email "orangefox-builder@localhost"
 
-          echo "===== Cloning OrangeFox sync ====="
-
-          git clone https://gitlab.com/OrangeFox/sync.git
+          git clone \
+            https://gitlab.com/OrangeFox/sync.git \
+            sync
 
           cd sync
-
-          echo "===== Syncing OrangeFox $MANIFEST_BRANCH ====="
 
           ./orangefox_sync.sh \
             --branch "$MANIFEST_BRANCH" \
             --path "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
 
 
-      # --------------------------------------------------
+      # ==========================================
       # DEVICE TREE
-      # --------------------------------------------------
+      # ==========================================
 
-      - name: Clone X6886 Device Tree
+      - name: Clone X6886 device tree
         shell: bash
         run: |
           set -e
 
           cd "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
 
-          echo "===== Preparing device directory ====="
-
           mkdir -p "$(dirname "$DEVICE_PATH")"
-
-          echo "===== Cloning X6886 device tree ====="
 
           git clone \
             --depth=1 \
@@ -173,18 +151,18 @@ jobs:
 
           echo "===== DEVICE TREE ====="
 
-          ls -lah "$DEVICE_PATH"
+          ls -la "$DEVICE_PATH"
 
           echo "===== DEVICE TREE COMMIT ====="
 
           git -C "$DEVICE_PATH" rev-parse HEAD
 
 
-      # --------------------------------------------------
-      # FIX X6886 DEVICE TREE
-      # --------------------------------------------------
+      # ==========================================
+      # FIX ANDROID PRODUCTS
+      # ==========================================
 
-      - name: Fix X6886 Device Tree
+      - name: Fix X6886 product definitions
         shell: bash
         run: |
           set -e
@@ -193,43 +171,17 @@ jobs:
 
           PRODUCT_FILE="$DEVICE_PATH/AndroidProducts.mk"
 
-          VENDORSETUP_FILE="$DEVICE_PATH/vendorsetup.sh"
-
-          PRODUCT_MK="$DEVICE_PATH/ofox_X6886.mk"
-
-          echo "=========================================="
-
-          echo "CHECKING X6886 DEVICE TREE"
-
-          echo "=========================================="
-
-          if [ ! -d "$DEVICE_PATH" ]; then
-            echo "ERROR: Device tree directory does not exist"
-
-            exit 1
-          fi
-
           if [ ! -f "$PRODUCT_FILE" ]; then
             echo "ERROR: AndroidProducts.mk not found"
 
             exit 1
           fi
 
-          if [ ! -f "$PRODUCT_MK" ]; then
-            echo "ERROR: ofox_X6886.mk not found"
-
-            exit 1
-          fi
-
-          echo "===== AndroidProducts.mk BEFORE ====="
+          echo "===== ORIGINAL AndroidProducts.mk ====="
 
           cat "$PRODUCT_FILE"
 
-          echo "=========================================="
-
-          echo "FIXING INVALID BP2A LUNCH VARIANT"
-
-          echo "=========================================="
+          echo "===== FIXING LUNCH NAMES ====="
 
           sed -i \
             's/ofox_X6886-bp2a-eng/ofox_X6886-eng/g' \
@@ -239,345 +191,70 @@ jobs:
             's/ofox_X6886-bp2a-userdebug/ofox_X6886-userdebug/g' \
             "$PRODUCT_FILE"
 
-          echo "===== AndroidProducts.mk AFTER ====="
+          echo "===== FIXED AndroidProducts.mk ====="
 
           cat "$PRODUCT_FILE"
 
+          echo "===== VERIFYING ====="
 
-          # --------------------------------------------------
-          # RECREATE VENDORSETUP.SH
-          # --------------------------------------------------
+          grep -q "ofox_X6886-eng" "$PRODUCT_FILE"
 
-          echo "=========================================="
+          grep -q "ofox_X6886-userdebug" "$PRODUCT_FILE"
 
-          echo "CREATING CLEAN vendorsetup.sh"
-
-          echo "=========================================="
-
-          cat > "$VENDORSETUP_FILE" <<'EOF'
-#!/bin/bash
-
-# Infinix HOT 60 Pro+
-# Device: X6886
-# SoC: MediaTek MT6789
-# Android 16 / XOS 16
-# OrangeFox R12.1
-# vendor_boot recovery
-
-export FOX_BUILD_DEVICE=X6886
-
-export TARGET_ARCH=arm64
-
-export FOX_AB_DEVICE=1
-
-export FOX_VIRTUAL_AB_DEVICE=1
-
-export FOX_VENDOR_BOOT_RECOVERY=1
-
-export FOX_LOCAL_CALLBACK_SCRIPT=device/infinix/X6886/ramdisk_callback.sh
-
-export OF_USE_LZMA_COMPRESSION=1
-
-export FOX_DRASTIC_SIZE_REDUCTION=1
-
-export FOX_VANILLA_BUILD=1
-
-export OF_DISABLE_MIUI_SPECIFIC_FEATURES=1
-
-export OF_DEFAULT_KEYMASTER_VERSION=7.0
-
-export OF_SCREEN_H=2400
-
-export OF_STATUS_H=144
-
-export OF_STATUS_INDENT_LEFT=48
-
-export OF_STATUS_INDENT_RIGHT=48
-
-export OF_HIDE_NOTCH=1
-
-export OF_CLOCK_POS=1
-
-export OF_ADVANCED_SECURITY=1
-
-export OF_SKIP_FBE_DECRYPTION=0
-
-export OF_KEEP_DM_VERITY_FORCED_ENCRYPTION=1
-
-export OF_DONT_PATCH_ENCRYPTED_DEVICE=1
-
-export OF_FBE_METADATA_MOUNT_IGNORE=1
-
-export OF_MAINTAINER="B E R U"
-EOF
-
-          chmod +x "$VENDORSETUP_FILE"
-
-          echo "===== NEW vendorsetup.sh ====="
-
-          cat "$VENDORSETUP_FILE"
+          echo "AndroidProducts.mk is OK"
 
 
-          # --------------------------------------------------
-          # VERIFY NO OLD COMMAND EXISTS
-          # --------------------------------------------------
+      # ==========================================
+      # FIX VENDORSETUP
+      # ==========================================
 
-          echo "=========================================="
-
-          echo "VERIFYING vendorsetup.sh"
-
-          echo "=========================================="
-
-          if grep -n "add_lunch_combo" "$VENDORSETUP_FILE"; then
-            echo "ERROR: add_lunch_combo still exists"
-
-            exit 1
-          fi
-
-          echo "OK: add_lunch_combo removed"
-
-
-          # --------------------------------------------------
-          # VERIFY LUNCH TARGET
-          # --------------------------------------------------
-
-          echo "=========================================="
-
-          echo "VERIFYING LUNCH TARGET"
-
-          echo "=========================================="
-
-          if ! grep -q "ofox_X6886-eng" "$PRODUCT_FILE"; then
-            echo "ERROR: ofox_X6886-eng not found"
-
-            exit 1
-          fi
-
-          echo "OK: ofox_X6886-eng found"
-
-
-          # --------------------------------------------------
-          # VERIFY VENDOR BOOT
-          # --------------------------------------------------
-
-          if ! grep -q "FOX_VENDOR_BOOT_RECOVERY=1" "$VENDORSETUP_FILE"; then
-            echo "ERROR: FOX_VENDOR_BOOT_RECOVERY is missing"
-
-            exit 1
-          fi
-
-          echo "OK: FOX_VENDOR_BOOT_RECOVERY enabled"
-
-
-          echo "=========================================="
-
-          echo "X6886 DEVICE TREE FIX COMPLETE"
-
-          echo "=========================================="
-
-
-      # --------------------------------------------------
-      # BUILD ORANGEFOX
-      # --------------------------------------------------
-
-      - name: Build OrangeFox
+      - name: Fix X6886 vendorsetup
         shell: bash
         run: |
           set -e
 
           cd "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
 
-          echo "=========================================="
+          VENDORSETUP="$DEVICE_PATH/vendorsetup.sh"
 
-          echo "LOADING ANDROID BUILD ENVIRONMENT"
-
-          echo "=========================================="
-
-          export ALLOW_MISSING_DEPENDENCIES=true
-
-          source build/envsetup.sh
-
-          echo "=========================================="
-
-          echo "AVAILABLE X6886 PRODUCTS"
-
-          echo "=========================================="
-
-          lunch | grep -i "ofox_X6886" || true
-
-          echo "=========================================="
-
-          echo "LUNCH OFOX X6886"
-
-          echo "=========================================="
-
-          lunch "ofox_${DEVICE_NAME}-eng"
-
-          echo "=========================================="
-
-          echo "BUILDING VENDOR_BOOT"
-
-          echo "=========================================="
-
-          m vendorbootimage -j2
-
-          echo "=========================================="
-
-          echo "VENDOR_BOOT BUILD FINISHED"
-
-          echo "=========================================="
-
-
-      # --------------------------------------------------
-      # FIND IMAGE
-      # --------------------------------------------------
-
-      - name: Find OrangeFox Image
-        shell: bash
-        run: |
-          set -e
-
-          OUT="$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH/out/target/product/$DEVICE_NAME"
-
-          echo "=========================================="
-
-          echo "OUTPUT DIRECTORY"
-
-          echo "=========================================="
-
-          ls -lah "$OUT"
-
-
-          echo "=========================================="
-
-          echo "SEARCHING ORANGEFOX IMAGE"
-
-          echo "=========================================="
-
-          IMG="$(find "$OUT" -maxdepth 1 -type f -name 'OrangeFox*.img' | head -n 1)"
-
-
-          if [ -z "$IMG" ]; then
-
-            echo "ERROR: OrangeFox image not found"
-
-            echo "===== ALL IMAGE FILES ====="
-
-            find \
-              "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH/out" \
-              -type f \
-              \( \
-                -name "*.img" \
-                -o \
-                -name "vendor_boot*" \
-                -o \
-                -name "*OrangeFox*" \
-              \) \
-              | head -200
+          if [ ! -f "$VENDORSETUP" ]; then
+            echo "ERROR: vendorsetup.sh not found"
 
             exit 1
-
           fi
 
+          echo "===== ORIGINAL vendorsetup.sh ====="
 
-          echo "=========================================="
+          cat "$VENDORSETUP"
 
-          echo "ORANGEFOX IMAGE FOUND"
+          echo "===== REMOVING add_lunch_combo ====="
 
-          echo "$IMG"
+          sed -i \
+            '/^[[:space:]]*add_lunch_combo[[:space:]]/d' \
+            "$VENDORSETUP"
 
-          echo "=========================================="
+          echo "===== FIXED vendorsetup.sh ====="
 
+          cat "$VENDORSETUP"
 
-          cp "$IMG" "$OUT/vendor_boot.img"
+          echo "===== VERIFYING vendorsetup.sh ====="
 
+          if grep -q "add_lunch_combo" "$VENDORSETUP"; then
+            echo "ERROR: add_lunch_combo still exists"
 
-          echo "=========================================="
+            exit 1
+          fi
 
-          echo "FINAL vendor_boot.img"
-
-          echo "=========================================="
-
-          ls -lh "$OUT/vendor_boot.img"
-
-
-          echo "FILE_PATH=$OUT" >> "$GITHUB_ENV"
-
-          echo "CHECK_IMG_IS_OK=true" >> "$GITHUB_ENV"
+          echo "vendorsetup.sh is OK"
 
 
-      # --------------------------------------------------
-      # RECOVERY INSTALLER
-      # --------------------------------------------------
+      # ==========================================
+      # VERIFY DEVICE TREE
+      # ==========================================
 
-      - name: Include Recovery Installer
-        if: ${{ inputs.RECOVERY_INSTALLER }}
+      - name: Verify X6886 tree
         shell: bash
         run: |
           set -e
 
-          cd "$FILE_PATH"
-
-          echo "=========================================="
-
-          echo "DOWNLOADING RECOVERY INSTALLER"
-
-          echo "=========================================="
-
-          wget -q \
-            https://github.com/kinguser981/recovery-installer/releases/download/11256427880/recovery-installer.zip
-
-          echo "=========================================="
-
-          echo "ADDING vendor_boot.img"
-
-          echo "=========================================="
-
-          zip -ur recovery-installer.zip vendor_boot.img
-
-          echo "===== INSTALLER ====="
-
-          ls -lh recovery-installer.zip
-
-
-      # --------------------------------------------------
-      # UPLOAD ARTIFACT
-      # --------------------------------------------------
-
-      - name: Upload Build Artifact
-        if: env.CHECK_IMG_IS_OK == 'true'
-        uses: actions/upload-artifact@v4
-
-        with:
-          name: OrangeFox-X6886-vendor_boot
-
-          path: |
-            ${{ env.FILE_PATH }}/vendor_boot.img
-            ${{ env.FILE_PATH }}/recovery-installer.zip
-
-          if-no-files-found: error
-
-
-      # --------------------------------------------------
-      # FINAL
-      # --------------------------------------------------
-
-      - name: Build Complete
-        if: success()
-        shell: bash
-        run: |
-          echo "=========================================="
-
-          echo "ORANGEFOX X6886 BUILD SUCCESS"
-
-          echo "=========================================="
-
-          echo "Device: X6886"
-
-          echo "Target: vendor_boot"
-
-          echo "Android: 16"
-
-          echo "OrangeFox: 12.1"
-
-          echo "=========================================="
+          cd "$G
