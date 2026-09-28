@@ -40,7 +40,7 @@ on:
 
       RECOVERY_TAR:
         description: "Release recovery.tar for Samsung devices"
-        required: false
+        required: true
         type: boolean
         default: false
 
@@ -129,11 +129,15 @@ jobs:
             "$DEVICE_TREE" \
             "$DEVICE_PATH"
 
-          echo "Device tree commit:"
+          echo "===== DEVICE TREE ====="
+
+          ls -la "$DEVICE_PATH"
+
+          echo "===== DEVICE TREE COMMIT ====="
 
           git -C "$DEVICE_PATH" rev-parse HEAD
 
-      - name: Fix X6886 product definition
+      - name: Fix X6886 device tree
         shell: bash
         env:
           MANIFEST_BRANCH: ${{ inputs.MANIFEST_BRANCH }}
@@ -144,25 +148,38 @@ jobs:
           cd "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
 
           PRODUCT_FILE="$DEVICE_PATH/AndroidProducts.mk"
+          VENDORSETUP_FILE="$DEVICE_PATH/vendorsetup.sh"
 
           if [ ! -f "$PRODUCT_FILE" ]; then
-            echo "ERROR: AndroidProducts.mk not found"
+            echo "ERROR: AndroidProducts.mk was not found"
             exit 1
           fi
 
-          echo "===== BEFORE FIX ====="
+          echo "===== AndroidProducts.mk BEFORE ====="
 
           cat "$PRODUCT_FILE"
+
+          echo "===== Fixing product name ====="
 
           sed -i \
             's/ofox_X6886-bp2a-eng/ofox_X6886-eng/g' \
             "$PRODUCT_FILE"
 
-          echo "===== AFTER FIX ====="
+          echo "===== Creating vendorsetup.sh ====="
+
+          touch "$VENDORSETUP_FILE"
+
+          chmod 644 "$VENDORSETUP_FILE"
+
+          echo "===== AndroidProducts.mk AFTER ====="
 
           cat "$PRODUCT_FILE"
 
-          echo "===== CHECKING PRODUCT ====="
+          echo "===== vendorsetup.sh ====="
+
+          ls -l "$VENDORSETUP_FILE"
+
+          echo "===== Checking OrangeFox lunch target ====="
 
           grep -n "ofox_X6886" "$PRODUCT_FILE"
 
@@ -176,13 +193,17 @@ jobs:
 
           cd "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
 
+          echo "===== SOURCE ENVIRONMENT ====="
+
           source build/envsetup.sh
 
           export ALLOW_MISSING_DEPENDENCIES=true
 
+          echo "===== LUNCH ====="
+
           lunch "ofox_${DEVICE_NAME}-eng"
 
-          make clean
+          echo "===== BUILD ====="
 
           mka vendorbootimage -j2
 
@@ -207,7 +228,8 @@ jobs:
             exit 1
           fi
 
-          echo "OrangeFox image found:"
+          echo "===== ORANGEFOX IMAGE ====="
+
           echo "$IMG"
 
           cp "$IMG" "$OUT/vendor_boot.img"
@@ -243,14 +265,14 @@ jobs:
         if: env.CHECK_IMG_IS_OK == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "x6886-${{ github.run_number }}"
-          name: "OrangeFox X6886 vendor_boot #${{ github.run_number }}"
+          tag_name: "X6886-${{ github.run_number }}"
+          name: "OrangeFox X6886 - Build ${{ github.run_number }}"
           files: |
             ${{ env.FILE_PATH }}/vendor_boot.img
             ${{ env.FILE_PATH }}/recovery-installer.zip
           body: |
-            Device: Infinix HOT 60 Pro+ (X6886)
+            Device: Infinix HOT 60 Pro+ X6886
+            Target: vendor_boot
             OrangeFox Branch: ${{ inputs.MANIFEST_BRANCH }}
             Device Tree: ${{ inputs.DEVICE_TREE }}
             Device Tree Branch: ${{ inputs.DEVICE_TREE_BRANCH }}
-            Build Target: vendorboot
