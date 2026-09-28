@@ -19,33 +19,27 @@ on:
         default: "android-12.1"
 
       DEVICE_PATH:
-        description: "Specify your device path"
+        description: "Device path"
         required: true
         default: "device/infinix/X6886"
 
       DEVICE_NAME:
-        description: "Specify your Device Codename"
+        description: "Device codename"
         required: true
         default: "X6886"
 
       BUILD_TARGET:
-        description: "Specify your Build Target"
+        description: "Build target"
         required: true
         default: "vendorboot"
 
       LDCHECK:
-        description: "Path of blobs to check"
+        description: "Blob path"
         required: true
         default: "vendor/bin/tee"
 
-      RECOVERY_TAR:
-        description: "Release recovery.tar for Samsung devices"
-        required: true
-        type: boolean
-        default: false
-
       RECOVERY_INSTALLER:
-        description: "Include recovery installer zip"
+        description: "Include recovery installer"
         required: true
         type: boolean
         default: true
@@ -59,6 +53,14 @@ jobs:
 
     permissions:
       contents: write
+
+    env:
+      MANIFEST_BRANCH: ${{ inputs.MANIFEST_BRANCH }}
+      DEVICE_TREE: ${{ inputs.DEVICE_TREE }}
+      DEVICE_TREE_BRANCH: ${{ inputs.DEVICE_TREE_BRANCH }}
+      DEVICE_PATH: ${{ inputs.DEVICE_PATH }}
+      DEVICE_NAME: ${{ inputs.DEVICE_NAME }}
+      BUILD_TARGET: ${{ inputs.BUILD_TARGET }}
 
     steps:
 
@@ -76,23 +78,21 @@ jobs:
       - name: Build Environment
         shell: bash
         run: |
-          set -euxo pipefail
+          set -e
 
           sudo apt update
           sudo apt -y upgrade
 
-          git clone https://gitlab.com/OrangeFox/misc/scripts "$GITHUB_WORKSPACE/scripts"
+          git clone https://gitlab.com/OrangeFox/misc/scripts
 
-          cd "$GITHUB_WORKSPACE/scripts"
+          cd scripts
 
           sudo bash setup/android_build_env.sh
 
-      - name: Set up OrangeFox source
+      - name: Set-up OrangeFox Manifest
         shell: bash
-        env:
-          MANIFEST_BRANCH: ${{ inputs.MANIFEST_BRANCH }}
         run: |
-          set -euxo pipefail
+          set -e
 
           mkdir -p "$GITHUB_WORKSPACE/OrangeFox"
 
@@ -109,15 +109,10 @@ jobs:
             --branch "$MANIFEST_BRANCH" \
             --path "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
 
-      - name: Clone X6886 device tree
+      - name: Clone X6886 Device Tree
         shell: bash
-        env:
-          MANIFEST_BRANCH: ${{ inputs.MANIFEST_BRANCH }}
-          DEVICE_TREE: ${{ inputs.DEVICE_TREE }}
-          DEVICE_TREE_BRANCH: ${{ inputs.DEVICE_TREE_BRANCH }}
-          DEVICE_PATH: ${{ inputs.DEVICE_PATH }}
         run: |
-          set -euxo pipefail
+          set -e
 
           cd "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
 
@@ -130,20 +125,15 @@ jobs:
             "$DEVICE_PATH"
 
           echo "===== DEVICE TREE ====="
-
           ls -la "$DEVICE_PATH"
 
           echo "===== DEVICE TREE COMMIT ====="
-
           git -C "$DEVICE_PATH" rev-parse HEAD
 
-      - name: Fix X6886 device tree
+      - name: Fix X6886 Device Tree
         shell: bash
-        env:
-          MANIFEST_BRANCH: ${{ inputs.MANIFEST_BRANCH }}
-          DEVICE_PATH: ${{ inputs.DEVICE_PATH }}
         run: |
-          set -euxo pipefail
+          set -e
 
           cd "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
 
@@ -151,15 +141,14 @@ jobs:
           VENDORSETUP_FILE="$DEVICE_PATH/vendorsetup.sh"
 
           if [ ! -f "$PRODUCT_FILE" ]; then
-            echo "ERROR: AndroidProducts.mk was not found"
+            echo "ERROR: AndroidProducts.mk not found"
             exit 1
           fi
 
           echo "===== AndroidProducts.mk BEFORE ====="
-
           cat "$PRODUCT_FILE"
 
-          echo "===== Fixing product name ====="
+          echo "===== Fixing old product name ====="
 
           sed -i \
             's/ofox_X6886-bp2a-eng/ofox_X6886-eng/g' \
@@ -167,53 +156,49 @@ jobs:
 
           echo "===== Creating vendorsetup.sh ====="
 
-          touch "$VENDORSETUP_FILE"
+          if [ ! -f "$VENDORSETUP_FILE" ]; then
+            printf '%s\n' '#!/bin/bash' > "$VENDORSETUP_FILE"
+          fi
 
           chmod 644 "$VENDORSETUP_FILE"
 
           echo "===== AndroidProducts.mk AFTER ====="
-
           cat "$PRODUCT_FILE"
 
           echo "===== vendorsetup.sh ====="
+          cat "$VENDORSETUP_FILE"
 
-          ls -l "$VENDORSETUP_FILE"
+          echo "===== Checking lunch target ====="
 
-          echo "===== Checking OrangeFox lunch target ====="
+          grep -q "ofox_X6886-eng" "$PRODUCT_FILE"
 
-          grep -n "ofox_X6886" "$PRODUCT_FILE"
+          echo "X6886 lunch target OK"
 
-      - name: Build OrangeFox vendor_boot
+      - name: Build OrangeFox
         shell: bash
-        env:
-          MANIFEST_BRANCH: ${{ inputs.MANIFEST_BRANCH }}
-          DEVICE_NAME: ${{ inputs.DEVICE_NAME }}
         run: |
-          set -euxo pipefail
+          set -e
 
           cd "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
 
-          echo "===== SOURCE ENVIRONMENT ====="
+          echo "===== Loading Android build environment ====="
 
           source build/envsetup.sh
 
           export ALLOW_MISSING_DEPENDENCIES=true
 
-          echo "===== LUNCH ====="
+          echo "===== Lunch ====="
 
           lunch "ofox_${DEVICE_NAME}-eng"
 
-          echo "===== BUILD ====="
+          echo "===== Build target ====="
 
           mka vendorbootimage -j2
 
-      - name: Find OrangeFox image
+      - name: Find OrangeFox Image
         shell: bash
-        env:
-          MANIFEST_BRANCH: ${{ inputs.MANIFEST_BRANCH }}
-          DEVICE_NAME: ${{ inputs.DEVICE_NAME }}
         run: |
-          set -euxo pipefail
+          set -e
 
           OUT="$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH/out/target/product/$DEVICE_NAME"
 
@@ -225,11 +210,17 @@ jobs:
 
           if [ -z "$IMG" ]; then
             echo "ERROR: OrangeFox image was not found"
+            echo "Searching all output directories..."
+
+            find "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH/out" \
+              -type f \
+              \( -name "*.img" -o -name "vendor_boot*" \) \
+              | head -100
+
             exit 1
           fi
 
-          echo "===== ORANGEFOX IMAGE ====="
-
+          echo "===== ORANGEFOX IMAGE FOUND ====="
           echo "$IMG"
 
           cp "$IMG" "$OUT/vendor_boot.img"
@@ -242,7 +233,7 @@ jobs:
         if: ${{ inputs.RECOVERY_INSTALLER }}
         shell: bash
         run: |
-          set -euxo pipefail
+          set -e
 
           cd "$FILE_PATH"
 
@@ -260,19 +251,3 @@ jobs:
             ${{ env.FILE_PATH }}/vendor_boot.img
             ${{ env.FILE_PATH }}/recovery-installer.zip
           if-no-files-found: error
-
-      - name: Create GitHub Release
-        if: env.CHECK_IMG_IS_OK == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "X6886-${{ github.run_number }}"
-          name: "OrangeFox X6886 - Build ${{ github.run_number }}"
-          files: |
-            ${{ env.FILE_PATH }}/vendor_boot.img
-            ${{ env.FILE_PATH }}/recovery-installer.zip
-          body: |
-            Device: Infinix HOT 60 Pro+ X6886
-            Target: vendor_boot
-            OrangeFox Branch: ${{ inputs.MANIFEST_BRANCH }}
-            Device Tree: ${{ inputs.DEVICE_TREE }}
-            Device Tree Branch: ${{ inputs.DEVICE_TREE_BRANCH }}
