@@ -136,40 +136,7 @@ jobs:
 
           git -C "$DEVICE_PATH" rev-parse HEAD
 
-      - name: Fix AndroidProducts
-        shell: bash
-        run: |
-          set -e
-
-          cd "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
-
-          PRODUCT_FILE="$DEVICE_PATH/AndroidProducts.mk"
-
-          if [ ! -f "$PRODUCT_FILE" ]; then
-            echo "ERROR: AndroidProducts.mk not found"
-            exit 1
-          fi
-
-          echo "===== ORIGINAL AndroidProducts.mk ====="
-          cat "$PRODUCT_FILE"
-
-          sed -i \
-            's/ofox_X6886-bp2a-eng/ofox_X6886-eng/g' \
-            "$PRODUCT_FILE"
-
-          sed -i \
-            's/ofox_X6886-bp2a-userdebug/ofox_X6886-userdebug/g' \
-            "$PRODUCT_FILE"
-
-          echo "===== FIXED AndroidProducts.mk ====="
-          cat "$PRODUCT_FILE"
-
-          grep -q 'ofox_X6886-eng' "$PRODUCT_FILE"
-          grep -q 'ofox_X6886-userdebug' "$PRODUCT_FILE"
-
-          echo "AndroidProducts.mk FIXED"
-
-      - name: Create safe X6886 vendorsetup
+      - name: Prepare X6886 vendorsetup
         shell: bash
         run: |
           set -e
@@ -178,71 +145,36 @@ jobs:
 
           VENDORSETUP="$DEVICE_PATH/vendorsetup.sh"
 
-          if [ ! -d "$DEVICE_PATH" ]; then
-            echo "ERROR: Device directory does not exist"
+          if [ ! -f "$VENDORSETUP" ]; then
+            echo "ERROR: vendorsetup.sh not found"
             exit 1
           fi
 
-          echo "===== REPLACING vendorsetup.sh ====="
+          echo "===== ORIGINAL vendorsetup.sh ====="
+          cat "$VENDORSETUP"
 
-          cat > "$VENDORSETUP" <<'EOF'
-          # X6886 OrangeFox Recovery configuration
-          # Infinix HOT 60 Pro+
-          # MT6789
-          # Android 16
-          # vendor_boot header v4
-
-          export FOX_BUILD_DEVICE=X6886
-          export TARGET_ARCH=arm64
-
-          export FOX_AB_DEVICE=1
-          export FOX_VIRTUAL_AB_DEVICE=1
-
-          export FOX_VENDOR_BOOT_RECOVERY=1
-
-          export FOX_LOCAL_CALLBACK_SCRIPT=device/infinix/X6886/ramdisk_callback.sh
-
-          export OF_USE_LZMA_COMPRESSION=1
-          export FOX_DRASTIC_SIZE_REDUCTION=1
-
-          export FOX_VANILLA_BUILD=1
-          export OF_DISABLE_MIUI_SPECIFIC_FEATURES=1
-
-          export OF_DEFAULT_KEYMASTER_VERSION=7.0
-
-          export OF_SCREEN_H=2400
-          export OF_STATUS_H=144
-          export OF_STATUS_INDENT_LEFT=48
-          export OF_STATUS_INDENT_RIGHT=48
-          export OF_HIDE_NOTCH=1
-          export OF_CLOCK_POS=1
-
-          export OF_FL_PATH1="/sys/devices/virtual/torch/torch/torch_level"
-          export OF_FL_PATH2="/sys/devices/virtual/flashlight_core/flashlight/flashlight_torch"
-
-          export OF_ADVANCED_SECURITY=1
-
-          export OF_SKIP_FBE_DECRYPTION=0
-          export OF_KEEP_DM_VERITY_FORCED_ENCRYPTION=1
-          export OF_DONT_PATCH_ENCRYPTED_DEVICE=1
-          export OF_FBE_METADATA_MOUNT_IGNORE=1
-
-          export OF_MAINTAINER="B E R U"
-          EOF
+          # Remove only legacy add_lunch_combo calls.
+          # Keep all device-specific FOX_* variables.
+          sed -i '/^[[:space:]]*add_lunch_combo[[:space:]]/d' "$VENDORSETUP"
 
           chmod 644 "$VENDORSETUP"
 
-          echo "===== NEW vendorsetup.sh ====="
+          echo "===== CLEANED vendorsetup.sh ====="
           cat "$VENDORSETUP"
 
-          echo "===== CHECKING FOR add_lunch_combo ====="
+          echo "===== SYNTAX CHECK ====="
+          bash -n "$VENDORSETUP"
 
-          if grep -q 'add_lunch_combo' "$VENDORSETUP"; then
-            echo "ERROR: add_lunch_combo still exists"
+          if grep -q '^[[:space:]]*add_lunch_combo[[:space:]]' "$VENDORSETUP"; then
+            echo "ERROR: legacy add_lunch_combo still exists"
             exit 1
           fi
 
-          echo "No add_lunch_combo found"
+          grep -q 'FOX_BUILD_DEVICE=X6886' "$VENDORSETUP"
+          grep -q 'TARGET_ARCH=arm64' "$VENDORSETUP"
+          grep -q 'FOX_VENDOR_BOOT_RECOVERY=1' "$VENDORSETUP"
+
+          echo "vendorsetup.sh prepared successfully"
 
       - name: Verify X6886 device tree
         shell: bash
@@ -285,15 +217,15 @@ jobs:
           echo "=========================================="
 
           grep -q \
-            'ofox_X6886-eng' \
+            'ofox_X6886-bp2a-eng' \
             "$DEVICE_PATH/AndroidProducts.mk"
 
           grep -q \
-            'ofox_X6886-userdebug' \
+            'ofox_X6886-bp2a-userdebug' \
             "$DEVICE_PATH/AndroidProducts.mk"
 
-          echo "ofox_X6886-eng       : OK"
-          echo "ofox_X6886-userdebug : OK"
+          echo "ofox_X6886-bp2a-eng       : OK"
+          echo "ofox_X6886-bp2a-userdebug : OK"
 
           echo "=========================================="
           echo "VERIFY VENDOR BOOT"
@@ -326,11 +258,32 @@ jobs:
 
           cd "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
 
+          test -f build/envsetup.sh
+          test -f "$DEVICE_PATH/vendorsetup.sh"
+          test -f "$DEVICE_PATH/AndroidProducts.mk"
+
           echo "=========================================="
           echo "LOADING ANDROID BUILD ENVIRONMENT"
           echo "=========================================="
 
-          source build/envsetup.sh
+          echo "===== SOURCE build/envsetup.sh ====="
+
+          set +e
+          source build/envsetup.sh 2>&1 | tee "$GITHUB_WORKSPACE/envsetup.log"
+          ENVSETUP_RC=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$ENVSETUP_RC" -ne 0 ]; then
+            echo "ERROR: build/envsetup.sh failed with exit code $ENVSETUP_RC"
+
+            echo "===== vendorsetup.sh ====="
+            cat "$DEVICE_PATH/vendorsetup.sh"
+
+            echo "===== envsetup.log ====="
+            cat "$GITHUB_WORKSPACE/envsetup.log"
+
+            exit "$ENVSETUP_RC"
+          fi
 
           echo "=========================================="
           echo "ENVIRONMENT LOADED"
@@ -361,7 +314,7 @@ jobs:
           echo "LUNCH X6886"
           echo "=========================================="
 
-          lunch "ofox_${DEVICE_NAME}-eng"
+          lunch "ofox_${DEVICE_NAME}-bp2a-eng"
 
           echo "=========================================="
           echo "LUNCH SUCCESS"
@@ -382,7 +335,7 @@ jobs:
           echo "LUNCH"
           echo "=========================================="
 
-          lunch "ofox_${DEVICE_NAME}-eng"
+          lunch "ofox_${DEVICE_NAME}-bp2a-eng"
 
           echo "=========================================="
           echo "BUILDING VENDOR_BOOT"
