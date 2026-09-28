@@ -51,27 +51,13 @@ jobs:
 
     steps:
 
-      # ==========================================
-      # CHECKOUT
-      # ==========================================
-
       - name: Checkout repository
         uses: actions/checkout@v4
-
-
-      # ==========================================
-      # SWAP
-      # ==========================================
 
       - name: Configure swap
         uses: pierotofy/set-swap-space@master
         with:
           swap-size-gb: 24
-
-
-      # ==========================================
-      # BUILD ENVIRONMENT
-      # ==========================================
 
       - name: Install build environment
         shell: bash
@@ -101,11 +87,6 @@ jobs:
 
           sudo bash setup/android_build_env.sh
 
-
-      # ==========================================
-      # ORANGEFOX SOURCE
-      # ==========================================
-
       - name: Sync OrangeFox source
         shell: bash
         run: |
@@ -116,7 +97,6 @@ jobs:
           cd "$GITHUB_WORKSPACE/OrangeFox"
 
           git config --global user.name "OrangeFox Builder"
-
           git config --global user.email "orangefox-builder@localhost"
 
           git clone \
@@ -128,11 +108,6 @@ jobs:
           ./orangefox_sync.sh \
             --branch "$MANIFEST_BRANCH" \
             --path "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
-
-
-      # ==========================================
-      # DEVICE TREE
-      # ==========================================
 
       - name: Clone X6886 device tree
         shell: bash
@@ -157,11 +132,6 @@ jobs:
 
           git -C "$DEVICE_PATH" rev-parse HEAD
 
-
-      # ==========================================
-      # FIX ANDROID PRODUCTS
-      # ==========================================
-
       - name: Fix X6886 product definitions
         shell: bash
         run: |
@@ -173,15 +143,12 @@ jobs:
 
           if [ ! -f "$PRODUCT_FILE" ]; then
             echo "ERROR: AndroidProducts.mk not found"
-
             exit 1
           fi
 
           echo "===== ORIGINAL AndroidProducts.mk ====="
 
           cat "$PRODUCT_FILE"
-
-          echo "===== FIXING LUNCH NAMES ====="
 
           sed -i \
             's/ofox_X6886-bp2a-eng/ofox_X6886-eng/g' \
@@ -195,18 +162,11 @@ jobs:
 
           cat "$PRODUCT_FILE"
 
-          echo "===== VERIFYING ====="
+          grep -q 'ofox_X6886-eng' "$PRODUCT_FILE"
 
-          grep -q "ofox_X6886-eng" "$PRODUCT_FILE"
+          grep -q 'ofox_X6886-userdebug' "$PRODUCT_FILE"
 
-          grep -q "ofox_X6886-userdebug" "$PRODUCT_FILE"
-
-          echo "AndroidProducts.mk is OK"
-
-
-      # ==========================================
-      # FIX VENDORSETUP
-      # ==========================================
+          echo "AndroidProducts.mk: OK"
 
       - name: Fix X6886 vendorsetup
         shell: bash
@@ -219,15 +179,12 @@ jobs:
 
           if [ ! -f "$VENDORSETUP" ]; then
             echo "ERROR: vendorsetup.sh not found"
-
             exit 1
           fi
 
           echo "===== ORIGINAL vendorsetup.sh ====="
 
           cat "$VENDORSETUP"
-
-          echo "===== REMOVING add_lunch_combo ====="
 
           sed -i \
             '/^[[:space:]]*add_lunch_combo[[:space:]]/d' \
@@ -237,24 +194,232 @@ jobs:
 
           cat "$VENDORSETUP"
 
-          echo "===== VERIFYING vendorsetup.sh ====="
-
-          if grep -q "add_lunch_combo" "$VENDORSETUP"; then
+          if grep -q 'add_lunch_combo' "$VENDORSETUP"; then
             echo "ERROR: add_lunch_combo still exists"
-
             exit 1
           fi
 
-          echo "vendorsetup.sh is OK"
-
-
-      # ==========================================
-      # VERIFY DEVICE TREE
-      # ==========================================
+          echo "vendorsetup.sh: OK"
 
       - name: Verify X6886 tree
         shell: bash
         run: |
           set -e
 
-          cd "$G
+          cd "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
+
+          echo "===== VERIFY DEVICE TREE ====="
+
+          if [ ! -f "$DEVICE_PATH/AndroidProducts.mk" ]; then
+            echo "ERROR: AndroidProducts.mk missing"
+            exit 1
+          fi
+
+          if [ ! -f "$DEVICE_PATH/ofox_X6886.mk" ]; then
+            echo "ERROR: ofox_X6886.mk missing"
+            exit 1
+          fi
+
+          if [ ! -f "$DEVICE_PATH/device.mk" ]; then
+            echo "ERROR: device.mk missing"
+            exit 1
+          fi
+
+          if [ ! -f "$DEVICE_PATH/vendorsetup.sh" ]; then
+            echo "ERROR: vendorsetup.sh missing"
+            exit 1
+          fi
+
+          echo "AndroidProducts.mk : OK"
+          echo "ofox_X6886.mk      : OK"
+          echo "device.mk          : OK"
+          echo "vendorsetup.sh     : OK"
+
+          echo "===== VERIFY PRODUCT ====="
+
+          if ! grep -q \
+            'PRODUCT_NAME[[:space:]]*:=[[:space:]]*ofox_X6886' \
+            "$DEVICE_PATH/ofox_X6886.mk"; then
+            echo "ERROR: PRODUCT_NAME is wrong"
+            exit 1
+          fi
+
+          if ! grep -q \
+            'PRODUCT_DEVICE[[:space:]]*:=[[:space:]]*X6886' \
+            "$DEVICE_PATH/ofox_X6886.mk"; then
+            echo "ERROR: PRODUCT_DEVICE is wrong"
+            exit 1
+          fi
+
+          echo "PRODUCT_NAME : OK"
+          echo "PRODUCT_DEVICE : OK"
+
+          echo "===== VERIFY LUNCH TARGETS ====="
+
+          if ! grep -q \
+            'ofox_X6886-eng' \
+            "$DEVICE_PATH/AndroidProducts.mk"; then
+            echo "ERROR: ofox_X6886-eng missing"
+            exit 1
+          fi
+
+          if ! grep -q \
+            'ofox_X6886-userdebug' \
+            "$DEVICE_PATH/AndroidProducts.mk"; then
+            echo "ERROR: ofox_X6886-userdebug missing"
+            exit 1
+          fi
+
+          echo "ofox_X6886-eng : OK"
+          echo "ofox_X6886-userdebug : OK"
+
+          echo "===== VERIFY VENDOR BOOT ====="
+
+          if ! grep -q \
+            'FOX_VENDOR_BOOT_RECOVERY=1' \
+            "$DEVICE_PATH/vendorsetup.sh"; then
+            echo "ERROR: FOX_VENDOR_BOOT_RECOVERY is missing"
+            exit 1
+          fi
+
+          echo "FOX_VENDOR_BOOT_RECOVERY : OK"
+
+          echo "===== VERIFY ARCHITECTURE ====="
+
+          if ! grep -q \
+            'TARGET_ARCH=arm64' \
+            "$DEVICE_PATH/vendorsetup.sh"; then
+            echo "ERROR: TARGET_ARCH arm64 is missing"
+            exit 1
+          fi
+
+          echo "TARGET_ARCH arm64 : OK"
+
+          echo "=========================================="
+          echo "DEVICE TREE VERIFICATION PASSED"
+          echo "=========================================="
+
+      - name: Build OrangeFox vendor_boot
+        shell: bash
+        run: |
+          set -e
+
+          cd "$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH"
+
+          echo "=========================================="
+          echo "LOADING ANDROID BUILD ENVIRONMENT"
+          echo "=========================================="
+
+          source build/envsetup.sh
+
+          export ALLOW_MISSING_DEPENDENCIES=true
+
+          echo "=========================================="
+          echo "LUNCH"
+          echo "=========================================="
+
+          lunch "ofox_${DEVICE_NAME}-eng"
+
+          echo "=========================================="
+          echo "BUILDING VENDOR_BOOT"
+          echo "=========================================="
+
+          mka vendorbootimage -j2
+
+          echo "=========================================="
+          echo "BUILD COMMAND FINISHED"
+          echo "=========================================="
+
+      - name: Locate OrangeFox image
+        shell: bash
+        run: |
+          set -e
+
+          OUT="$GITHUB_WORKSPACE/OrangeFox/fox_$MANIFEST_BRANCH/out/target/product/$DEVICE_NAME"
+
+          echo "===== OUTPUT DIRECTORY ====="
+
+          if [ ! -d "$OUT" ]; then
+            echo "ERROR: Output directory does not exist"
+            exit 1
+          fi
+
+          ls -lah "$OUT"
+
+          echo "===== SEARCHING FOR IMAGE ====="
+
+          IMG=""
+
+          if [ -f "$OUT/vendor_boot.img" ]; then
+            IMG="$OUT/vendor_boot.img"
+          fi
+
+          if [ -z "$IMG" ]; then
+            IMG="$(find "$OUT" -maxdepth 1 -type f -name 'OrangeFox*.img' -print -quit)"
+          fi
+
+          if [ -z "$IMG" ]; then
+            IMG="$(find "$OUT" -maxdepth 1 -type f -name '*.img' -print -quit)"
+          fi
+
+          if [ -z "$IMG" ]; then
+            echo "ERROR: No image found"
+            echo "===== IMAGE FILES ====="
+            find "$OUT" -maxdepth 1 -type f -name '*.img' -print
+            exit 1
+          fi
+
+          echo "IMAGE FOUND: $IMG"
+
+          if [ "$IMG" != "$OUT/vendor_boot.img" ]; then
+            cp "$IMG" "$OUT/vendor_boot.img"
+          fi
+
+          echo "===== FINAL IMAGE ====="
+
+          ls -lh "$OUT/vendor_boot.img"
+
+          file "$OUT/vendor_boot.img"
+
+          echo "FILE_PATH=$OUT" >> "$GITHUB_ENV"
+
+      - name: Check vendor_boot image
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f "$FILE_PATH/vendor_boot.img" ]; then
+            echo "ERROR: vendor_boot.img missing"
+            exit 1
+          fi
+
+          SIZE="$(stat -c%s "$FILE_PATH/vendor_boot.img")"
+
+          echo "vendor_boot.img size: $SIZE bytes"
+
+          if [ "$SIZE" -lt 1048576 ]; then
+            echo "ERROR: vendor_boot.img is suspiciously small"
+            exit 1
+          fi
+
+          echo "vendor_boot.img basic check passed"
+
+      - name: Upload OrangeFox vendor_boot
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrangeFox-X6886-vendor_boot
+          path: ${{ env.FILE_PATH }}/vendor_boot.img
+          if-no-files-found: error
+
+      - name: Build complete
+        if: success()
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "ORANGEFOX BUILD SUCCESS"
+          echo "=========================================="
+          echo "Device : X6886"
+          echo "Target : vendor_boot"
+          echo "Android: 16"
+          echo "Branch : 12.1"
+          echo "=========================================="
